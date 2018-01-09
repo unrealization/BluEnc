@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# BluEnc - DVDEnc 1.0
+# BluEnc - DVDEnc 1.0.0
 #
 # Encode DVD movies
 #

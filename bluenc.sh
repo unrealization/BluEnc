@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# BluEnc 1.50
+# BluEnc 1.6.0
 #
 # Encode BluRay movies
 #
@@ -18,6 +18,9 @@ while [[ ${#} > 0 ]]; do
 		shift
 		THREADS="${1}"
 		;;
+		"-novideo")
+		ENABLE_VIDEO=0
+		;;
 		"-res")
 		shift
 		RESOLUTION="${1}"
@@ -33,6 +36,9 @@ while [[ ${#} > 0 ]]; do
 		"-vbr")
 		shift
 		BITRATE_VIDEO="${1}"
+		;;
+		"-noaudio")
+		ENABLE_AUDIO=0
 		;;
 		"-abr")
 		shift
@@ -70,6 +76,10 @@ if [ "${THREADS}" == "" ]; then
 	THREADS=2
 fi
 
+if [ "${ENABLE_VIDEO}" == "" ]; then
+	ENABLE_VIDEO=1
+fi
+
 if [ "${RESOLUTION}" == "" ]; then
 	RESOLUTION="auto"
 fi
@@ -80,6 +90,10 @@ fi
 
 if [ "${BITRATE_VIDEO}" == "" ]; then
 	BITRATE_VIDEO="4000k"
+fi
+
+if [ "${ENABLE_AUDIO}" == "" ]; then
+	ENABLE_AUDIO=1
 fi
 
 if [ "${BITRATE_AUDIO}" == "" ]; then
@@ -136,7 +150,7 @@ if [ "${FFPROBE}" == "" ]; then
 	exit 1
 fi
 
-if [ "${CROPDETECT}" == "" ] && [ "${CROP}" == "auto" ]; then
+if [ "${ENABLE_VIDEO}" == "1" ] && [ "${CROPDETECT}" == "" ] && [ "${CROP}" == "auto" ]; then
 	echo "cropdetect.sh not found"
 	exit 1
 fi
@@ -147,18 +161,20 @@ TMPNAME=$(mktemp /tmp/bluenc.XXXXXX)
 
 ffprobe ${INFILE} 2> ${TMPNAME}
 
-VIDEO="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | awk -F '#' '{ print $2 }' | awk -F '(' '{ print $1 }')"
+if [ "${ENABLE_VIDEO}" == "1" ]; then
+	VIDEO="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | awk -F '#' '{ print $2 }' | awk -F '(' '{ print $1 }')"
 
-if [ "${VIDEO}" != "" ]; then
-	HAVE_VIDEO=1
-fi
+	if [ "${VIDEO}" != "" ]; then
+		HAVE_VIDEO=1
+	fi
 
-if [ "${RESOLUTION}" == "auto" ]; then
-	RESOLUTION="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \([0-9]*x[0-9]*\) .*$@\1@')"
-fi
+	if [ "${RESOLUTION}" == "auto" ]; then
+		RESOLUTION="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \([0-9]*x[0-9]*\) .*$@\1@')"
+	fi
 
-if [ "${FRAMERATE}" == "auto" ]; then
-	FRAMERATE="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \(.*\) fps.*$@\1@')"
+	if [ "${FRAMERATE}" == "auto" ]; then
+		FRAMERATE="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \(.*\) fps.*$@\1@')"
+	fi
 fi
 
 for LANGUAGE in ${LANGUAGES}; do
@@ -213,12 +229,12 @@ fi
 
 # Sanity checks
 
-if [ "${HAVE_VIDEO}" != "1" ]; then
+if [ "${ENABLE_VIDEO}" == "1" ] && [ "${HAVE_VIDEO}" != "1" ]; then
 	echo "Video stream not found"
 	exit 1
 fi
 
-if [ "${HAVE_AUDIO}" != "1" ]; then
+if [ "${ENABLE_AUDIO}" == "1" ] && [ "${HAVE_AUDIO}" != "1" ]; then
 	echo "No audio stream found"
 	exit 1
 fi
@@ -237,28 +253,34 @@ if [ "${CODEC_AUDIO}" == "aac" ]; then
 	FFMPEGOPTIONS="${FFMPEGOPTIONS} -strict -2"
 fi
 
-FFMPEGOPTIONS="${FFMPEGOPTIONS} -threads ${THREADS} -s ${RESOLUTION} -r ${FRAMERATE} -map ${VIDEO} -c:v ${CODEC_VIDEO} -b:v ${BITRATE_VIDEO}"
+FFMPEGOPTIONS="${FFMPEGOPTIONS} -threads ${THREADS}"
 
-if [ "${CROP}" != "" ]; then
-	FFMPEGOPTIONS="${FFMPEGOPTIONS} -vf crop=${CROP}"
+if [ "${ENABLE_VIDEO}" == "1" ]; then
+	FFMPEGOPTIONS="${FFMPEGOPTIONS} -s ${RESOLUTION} -r ${FRAMERATE} -map ${VIDEO} -c:v ${CODEC_VIDEO} -b:v ${BITRATE_VIDEO}"
+
+	if [ "${CROP}" != "" ]; then
+		FFMPEGOPTIONS="${FFMPEGOPTIONS} -vf crop=${CROP}"
+	fi
 fi
 
-CHANNEL=0
+if [ "${ENABLE_AUDIO}" == "1" ]; then
+	CHANNEL=0
 
-for LANGUAGE in ${LANGUAGES}; do
-	LANGVAR="AUDIO_${LANGUAGE}"
+	for LANGUAGE in ${LANGUAGES}; do
+		LANGVAR="AUDIO_${LANGUAGE}"
 
-	if [ "${!LANGVAR}" != "" ]; then
-		FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR} -c:a:${CHANNEL} ${CODEC_AUDIO} -b:a:${CHANNEL} ${BITRATE_AUDIO}"
-		LANGVAR="CHANNELS_${LANGUAGE}"
+		if [ "${!LANGVAR}" != "" ]; then
+			FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR} -c:a:${CHANNEL} ${CODEC_AUDIO} -b:a:${CHANNEL} ${BITRATE_AUDIO}"
+			LANGVAR="CHANNELS_${LANGUAGE}"
 
-		if [ "${CODEC_AUDIO}" == "aac" ] && [ "${!LANGVAR}" == "6.1" ]; then
-			FFMPEGOPTIONS="${FFMPEGOPTIONS} -ac:a:${CHANNEL} 6"
+			if [ "${CODEC_AUDIO}" == "aac" ] && [ "${!LANGVAR}" == "6.1" ]; then
+				FFMPEGOPTIONS="${FFMPEGOPTIONS} -ac:a:${CHANNEL} 6"
+			fi
+
+			CHANNEL=$(expr ${CHANNEL} + 1)
 		fi
-
-		CHANNEL=$(expr ${CHANNEL} + 1)
-	fi
-done
+	done
+fi
 
 if [ "${ENABLE_SUBS}" == "1" ]; then
 	CHANNEL=0
