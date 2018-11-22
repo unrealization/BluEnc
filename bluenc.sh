@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# BluEnc 1.7.0
+# BluEnc 1.7.1
 #
 # Encode BluRay movies
 #
@@ -305,7 +305,7 @@ if [ "${ENABLE_AUDIO}" == "1" ]; then
 				FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:a:${CHANNEL} ${CODEC_AUDIO} -b:a:${CHANNEL} ${BITRATE_AUDIO}"
 				LANGVAR="CHANNELS_${LANGUAGE}"
 
-				if [ "${CODEC_AUDIO}" == "aac" ] && [ "${!LANGVAR}" == "6.1" ]; then
+				if [ "${CODEC_AUDIO}" == "aac" ] && ([ "${!LANGVAR}" == "5.1(side)" ] || [ "${!LANGVAR}" == "6.1" ]); then
 					FFMPEGOPTIONS="${FFMPEGOPTIONS} -ac:a:${CHANNEL} 6"
 				fi
 			fi
