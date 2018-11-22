@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# BluEnc 1.6.0
+# BluEnc 1.7.0
 #
 # Encode BluRay movies
 #
@@ -17,6 +17,9 @@ while [[ ${#} > 0 ]]; do
 		"-t")
 		shift
 		THREADS="${1}"
+		;;
+		"-copyvideo")
+		COPY_VIDEO=1
 		;;
 		"-novideo")
 		ENABLE_VIDEO=0
@@ -37,12 +40,18 @@ while [[ ${#} > 0 ]]; do
 		shift
 		BITRATE_VIDEO="${1}"
 		;;
+		"-copyaudio")
+		COPY_AUDIO=1
+		;;
 		"-noaudio")
 		ENABLE_AUDIO=0
 		;;
 		"-abr")
 		shift
 		BITRATE_AUDIO="${1}"
+		;;
+		"-copysubs")
+		COPY_SUBS=1
 		;;
 		"-nosubs")
 		ENABLE_SUBS=0
@@ -76,6 +85,10 @@ if [ "${THREADS}" == "" ]; then
 	THREADS=2
 fi
 
+if [ "${COPY_VIDEO}" == "" ]; then
+	COPY_VIDEO=0
+fi
+
 if [ "${ENABLE_VIDEO}" == "" ]; then
 	ENABLE_VIDEO=1
 fi
@@ -92,12 +105,20 @@ if [ "${BITRATE_VIDEO}" == "" ]; then
 	BITRATE_VIDEO="4000k"
 fi
 
+if [ "${COPY_AUDIO}" == "" ]; then
+	COPY_AUDIO=0
+fi
+
 if [ "${ENABLE_AUDIO}" == "" ]; then
 	ENABLE_AUDIO=1
 fi
 
 if [ "${BITRATE_AUDIO}" == "" ]; then
 	BITRATE_AUDIO="320k"
+fi
+
+if [ "${COPY_SUBS}" == "" ]; then
+	COPY_SUBS=0
 fi
 
 if [ "${ENABLE_SUBS}" == "" ]; then
@@ -243,23 +264,29 @@ fi
 
 FFMPEGOPTIONS=""
 
-if [ "${ENABLE_SUBS}" == "1" ] && [ "${HAVE_SUBS}" == "1" ]; then
+if [ "${ENABLE_SUBS}" == "1" ] && [ "${HAVE_SUBS}" == "1" ] && [ "${COPY_SUBS}" == "0" ]; then
 	FFMPEGOPTIONS="${FFMPEGOPTIONS} -fix_sub_duration"
 fi
 
 FFMPEGOPTIONS="${FFMPEGOPTIONS} -i ${INFILE}"
 
-if [ "${CODEC_AUDIO}" == "aac" ]; then
+if [ "${CODEC_AUDIO}" == "aac" ] && [ "${COPY_AUDIO}" == "0" ]; then
 	FFMPEGOPTIONS="${FFMPEGOPTIONS} -strict -2"
 fi
 
 FFMPEGOPTIONS="${FFMPEGOPTIONS} -threads ${THREADS}"
 
 if [ "${ENABLE_VIDEO}" == "1" ]; then
-	FFMPEGOPTIONS="${FFMPEGOPTIONS} -s ${RESOLUTION} -r ${FRAMERATE} -map ${VIDEO} -c:v ${CODEC_VIDEO} -b:v ${BITRATE_VIDEO}"
+	FFMPEGOPTIONS="${FFMPEGOPTIONS} -s ${RESOLUTION} -r ${FRAMERATE} -map ${VIDEO}"
 
-	if [ "${CROP}" != "" ]; then
-		FFMPEGOPTIONS="${FFMPEGOPTIONS} -vf crop=${CROP}"
+	if [ "${COPY_VIDEO}" == "1" ]; then
+		FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:v copy"
+	else
+		FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:v ${CODEC_VIDEO} -b:v ${BITRATE_VIDEO}"
+
+		if [ "${CROP}" != "" ]; then
+			FFMPEGOPTIONS="${FFMPEGOPTIONS} -vf crop=${CROP}"
+		fi
 	fi
 fi
 
@@ -270,11 +297,17 @@ if [ "${ENABLE_AUDIO}" == "1" ]; then
 		LANGVAR="AUDIO_${LANGUAGE}"
 
 		if [ "${!LANGVAR}" != "" ]; then
-			FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR} -c:a:${CHANNEL} ${CODEC_AUDIO} -b:a:${CHANNEL} ${BITRATE_AUDIO}"
-			LANGVAR="CHANNELS_${LANGUAGE}"
+			FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR}"
 
-			if [ "${CODEC_AUDIO}" == "aac" ] && [ "${!LANGVAR}" == "6.1" ]; then
-				FFMPEGOPTIONS="${FFMPEGOPTIONS} -ac:a:${CHANNEL} 6"
+			if [ "${COPY_AUDIO}" == "1" ]; then
+				FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:a:${CHANNEL} copy"
+			else
+				FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:a:${CHANNEL} ${CODEC_AUDIO} -b:a:${CHANNEL} ${BITRATE_AUDIO}"
+				LANGVAR="CHANNELS_${LANGUAGE}"
+
+				if [ "${CODEC_AUDIO}" == "aac" ] && [ "${!LANGVAR}" == "6.1" ]; then
+					FFMPEGOPTIONS="${FFMPEGOPTIONS} -ac:a:${CHANNEL} 6"
+				fi
 			fi
 
 			CHANNEL=$(expr ${CHANNEL} + 1)
@@ -289,7 +322,14 @@ if [ "${ENABLE_SUBS}" == "1" ]; then
 		LANGVAR="SUB_${LANGUAGE}"
 
 		if [ "${!LANGVAR}" != "" ]; then
-			FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR} -c:s:${CHANNEL} dvd_subtitle"
+			FFMPEGOPTIONS="${FFMPEGOPTIONS} -map ${!LANGVAR}"
+
+			if [ "${COPY_SUBS}" == "1" ]; then
+				FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:s:${CHANNEL} copy"
+			else
+				FFMPEGOPTIONS="${FFMPEGOPTIONS} -c:s:${CHANNEL} dvd_subtitle"
+			fi
+
 			CHANNEL=$(expr ${CHANNEL} + 1)
 		fi
 	done
