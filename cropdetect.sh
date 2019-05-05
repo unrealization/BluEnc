@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# BluRip - CropDetect 1.0.0
+# BluEnc - CropDetect 1.0.1
 #
 # Detect the crop size for movies
 #
