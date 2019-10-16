@@ -1,10 +1,12 @@
 #!/bin/bash
 
 #
-# BluEnc 1.7.1
+# BluEnc 1.8.0
 #
 # Encode BluRay movies
 #
+
+# Parameters
 
 while [[ ${#} > 0 ]]; do
 	PARAMETER="${1}"
@@ -23,6 +25,10 @@ while [[ ${#} > 0 ]]; do
 		;;
 		"-novideo")
 		ENABLE_VIDEO=0
+		;;
+		"-3dout")
+		shift
+		THREEDOUT="${1}"
 		;;
 		"-res")
 		shift
@@ -77,6 +83,8 @@ while [[ ${#} > 0 ]]; do
 	shift
 done
 
+# Default values
+
 if [ "${FORMAT}" == "" ]; then
 	FORMAT="mkv"
 fi
@@ -91,6 +99,10 @@ fi
 
 if [ "${ENABLE_VIDEO}" == "" ]; then
 	ENABLE_VIDEO=1
+fi
+
+if [ "${THREEDOUT}" == "" ]; then
+	THREEDOUT="mono"
 fi
 
 if [ "${RESOLUTION}" == "" ]; then
@@ -157,9 +169,57 @@ if [ ! -r "${INFILE}" ]; then
 	exit 1
 fi
 
+case "${THREEDOUT}" in
+	"mono")
+	;;
+	"mono-left")
+	THREEDOUT="mono"
+	;;
+	"mono-right")
+	;;
+	"sbs")
+	;;
+	"side-by-side")
+	THREEDOUT="sbs"
+	;;
+	"left-right")
+	THREEDOUT="sbs"
+	;;
+	"sbsinv")
+	;;
+	"side-by-side-inverted")
+	THREEDOUT="sbsinv"
+	;;
+	"right-left")
+	THREEDOUT="sbsinv"
+	;;
+	"block-lr")
+	;;
+	"frame-alternate")
+	THREEDOUT="block-lr"
+	;;
+	"block-rl")
+	;;
+	"frame-alternate-inverted")
+	THREEDOUT="block-rl"
+	;;
+	*)
+	echo "Invalid 3d output format: ${THREEDOUT}"
+	echo "The following formats are currently supported:"
+	echo "	mono (mono-left)"
+	echo "	mono-right"
+	echo "	sbs (side-by-side, left-right)"
+	echo "	sbsinv (side-by-side-inverted, right-left)"
+	echo "	block-lr (frame-alternate)"
+	echo "	block-rl (frame-alternate-inverted)"
+	exit 1
+	;;
+esac
+
 FFMPEG=$(which ffmpeg 2>/dev/null)
 FFPROBE=$(which ffprobe 2>/dev/null)
 CROPDETECT=$(which cropdetect.sh 2>/dev/null)
+THREEDDETECT=$(which 3ddetect.sh 2>/dev/null)
 
 if [ "${FFMPEG}" == "" ]; then
 	echo "ffmpeg not found"
@@ -171,9 +231,16 @@ if [ "${FFPROBE}" == "" ]; then
 	exit 1
 fi
 
-if [ "${ENABLE_VIDEO}" == "1" ] && [ "${CROPDETECT}" == "" ] && [ "${CROP}" == "auto" ]; then
-	echo "cropdetect.sh not found"
-	exit 1
+if [ "${ENABLE_VIDEO}" == "1" ]; then
+	if [ "${CROPDETECT}" == "" ] && [ "${CROP}" == "auto" ]; then
+		echo "cropdetect.sh not found"
+		exit 1
+	fi
+
+	if [ "${THREEDDETECT}" == "" ]; then
+		echo "3ddetect.sh not found"
+		exit 1
+	fi
 fi
 
 # File probing
@@ -183,14 +250,14 @@ TMPNAME=$(mktemp /tmp/bluenc.XXXXXX)
 ffprobe ${INFILE} 2> ${TMPNAME}
 
 if [ "${ENABLE_VIDEO}" == "1" ]; then
-	VIDEO="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | awk -F '#' '{ print $2 }' | awk -F '(' '{ print $1 }')"
+	VIDEO="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*Stream #\([0-9]*:[0-9]*\).*$@\1@')"
 
 	if [ "${VIDEO}" != "" ]; then
 		HAVE_VIDEO=1
 	fi
 
 	if [ "${RESOLUTION}" == "auto" ]; then
-		RESOLUTION="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \([0-9]*x[0-9]*\) .*$@\1@')"
+		RESOLUTION="$(cat ${TMPNAME} | grep Stream | grep Video -m 1 | sed 's@^.*, \([0-9]*x[0-9]*\)[, ].*$@\1@')"
 	fi
 
 	if [ "${FRAMERATE}" == "auto" ]; then
@@ -231,6 +298,11 @@ if [ "${CROP}" == "auto" ]; then
 	CROPSIZE="$(${CROPDETECT} ${INFILE})"
 	CROP="${?}"
 
+	if [ "${CROP}" == "-1" ]; then
+		echo "cropdetect.sh failed."
+		exit 1
+	fi
+
 	if [ "${CROP}" == "0" ]; then
 		CROP=${CROPSIZE}
 	else
@@ -246,6 +318,73 @@ if [ "${CROP}" == "auto" ]; then
 			exit 1
 		fi
 	fi
+fi
+
+THREEDINFO="$(${THREEDDETECT} ${INFILE})"
+THREEDSTATUS="${?}"
+
+if [ "${THREEDSTATUS}" == "-1" ]; then
+	echo "3ddetect.sh failed."
+	exit 1
+fi
+
+case "${THREEDINFO}" in
+	":")
+	;;
+	"2D:")
+	;;
+	"side by side:left_right")
+	INFILTER="sbsl"
+	;;
+	"side by side (inverted):right_left")
+	INFILTER="sbsr"
+	;;
+	"frame alternate:block_lr")
+	INFILTER="al"
+	;;
+	"frame alternate (inverted):block_rl")
+	INFILTER="ar"
+	;;
+	*)
+	echo "Unknown 3D format: ${THREEDINFO}"
+	exit 1
+	;;
+esac
+
+if [ "${INFILTER}" != "" ]; then
+	case "${THREEDOUT}" in
+		"mono")
+		OUTFILTER="ml"
+		OUTMETA=""
+		;;
+		"mono-right")
+		OUTFILTER="mr"
+		OUTMETA=""
+		;;
+		"sbs")
+		OUTFILTER="sbsl"
+		OUTMETA="left_right"
+		;;
+		"sbsinv")
+		OUTFILTER="sbsr"
+		OUTMETA="right_left"
+		;;
+		"block-lr")
+		OUTFILTER="al"
+		OUTMETA="block_lr"
+		;;
+		"block-rl")
+		OUTFILTER="ar"
+		OUTMETA="block_rl"
+		;;
+		*)
+		echo "Unknown 3D format: ${THREEDOUT}"
+		exit 1
+		;;
+	esac
+
+	THREEDOPTIONS="-vf stereo3d=${INFILTER}:${OUTFILTER}"
+	THREEDOPTIONS="${THREEDOPTIONS} -metadata:s:v:0 stereo_mode=\"${OUTMETA}\""
 fi
 
 # Sanity checks
@@ -286,6 +425,10 @@ if [ "${ENABLE_VIDEO}" == "1" ]; then
 
 		if [ "${CROP}" != "" ]; then
 			FFMPEGOPTIONS="${FFMPEGOPTIONS} -vf crop=${CROP}"
+		fi
+
+		if [ "${THREEDOPTIONS}" != "" ]; then
+			FFMPEGOPTIONS="${FFMPEGOPTIONS} ${THREEDOPTIONS}"
 		fi
 	fi
 fi
